@@ -1,7 +1,9 @@
 import os
 import stat
-import shutil
+import subprocess
+from pyfiglet import Figlet
 import sys
+import time
 #import inspect
 from dotenv import load_dotenv
 from pyclickup import ClickUp
@@ -10,17 +12,22 @@ from colorama import Fore, Back, Style
 from fuzzywuzzy import fuzz
 from pathlib import Path
 
+f = Figlet(font='slant')
+print (f.renderText('Resolve/Clickup Cache Cleaner'))
+
+print(Fore.MAGENTA + "This script will delete files. No output will be visible during deletion\n" +
+                    "Follow prompts carefully!\n")
+
+time.sleep(5)
 
 # Change .env file to alter variables #
-
-
 try:
     load_dotenv()
 except Exception as e:
     print(e)
     input("Failed to load .env file. \nPress enter to continue...")
 else:
-    print("Loaded configuration from .env")
+    print(Fore.GREEN + "Loaded configuration from .env")
 
 	
 init(autoreset=True)
@@ -28,7 +35,7 @@ init(autoreset=True)
 ######################### GET CLICKUP TASKS ###############################
 ###########################################################################
 
-print(Fore.GREEN + "Instantiating clickup API")
+print(Fore.MAGENTA + "\nInstantiating clickup API")
 clickup = ClickUp(os.getenv("CLICKUP_TOKEN"))
 watch_space = os.getenv("WATCH_SPACE")
 
@@ -44,7 +51,7 @@ for space in main_team.spaces:
 main_project = main_space.projects[0]
 main_list = main_project.lists[0]
 
-print(Fore.GREEN + "Getting low priority project tasks...\n")
+print(Fore.GREEN + "Getting low priority project tasks...")
 tasks = main_list.get_all_tasks(include_closed=True)
 
 low_priority_tasks = []
@@ -65,23 +72,27 @@ elif len(low_priority_tasks) == 0:
     sys.exit(1)
 
 ###########################################################################
-################ GET PROJECTS WITH OPTIMIZED MEDIA ########################
+################ GET PROJECTS WITH cache MEDIA ########################
 ###########################################################################
 
-media_dir = os.getenv("OPTIMIZED_MEDIA_DIR")
+print(Fore.MAGENTA + "\nSearching drive for corresponding projects")
+
+media_dir = os.getenv("MEDIA_CACHE_DIR")
+deletable_ext = os.getenv("CACHE_FILE_FORMAT")
 
 # Check directory exists
 try:
     os.access(media_dir, os.W_OK)
-except():
+except:
     print(Fore.RED + f"Could not access \"{media_dir}\". Invalid path.")
     sys.exit(1)
-print(Fore.GREEN + "Optimized media directory exists and is writable")
+    
+print(Fore.GREEN + "Media cache directory exists and is writable")
 
 # Check go ahead
 for task in low_priority_tasks:
     print(f"\"{task.name}\"|{task.status.status}")
-go_ahead = input(Fore.YELLOW + "If a match is found for one of the projects above, its optimized media will be deleted.\n" +
+go_ahead = input(Fore.YELLOW + "\nIf a match is found for one of the projects above, its cached media will be deleted.\n" +
             "Type 'Yes', 'No', or 'Choose' if you would like to approve each deletion one by one.\n")
 
 choose = False
@@ -99,7 +110,7 @@ else:
 
 
 valid_project_folders = []
-print(Fore.GREEN + "Getting optimized media folders...")
+print(Fore.GREEN + "Getting project media cache folders...")
 project_folders = next(os.walk(media_dir))[1]
 for project in project_folders:
     project_info = f"{media_dir}\\{project}\\info.txt"
@@ -110,6 +121,7 @@ for project in project_folders:
     else:
         valid_project_folders.append(project_info)
 
+# Find all existing proejcts, determine name and path
 existing_projects = []
 inaccessible_folders = []
 print(Fore.GREEN + "Reading info.txt files...")
@@ -117,48 +129,92 @@ for project_info in valid_project_folders:
     
     try:
         with open(project_info, "r+") as file:
-            project_name = file.readlines()[2]
-            project_name = project_name[14:]
-            project_path = os.path.abspath(os.path.join(project_info, '..'))
-            existing_projects.append({'project_name':project_name, 'project_path': project_path})
+            name = file.readlines()[2]
+            name = name[14:]
+            path = os.path.abspath(os.path.join(project_info, '..'))
+            existing_projects.append({'name':name, 'path': path})
     except:
         inaccessible_folders.append(project_info)
         continue
 
-print(Fore.YELLOW + f"{len(inaccessible_folders)} folders were inaccessible or invalid optimized media directories and were skipped.")
+# Check existing projects have deletable media
+existing_no_media = []
+print(Fore.GREEN + "Checking for media...\n")
+for project in existing_projects:
+    for root, dirs, files in os.walk(project['path']):
+        for file in files:
+            # Found a deletable item?
+            if file.endswith(deletable_ext):
+                print(file)
+                # waste no more time
+                break
 
+
+    # This project had none?
+    else:
+        print(Fore.YELLOW + f"Existing project \"{project['name']}\" has no deletable media. Skipping.")
+        existing_no_media.append(project)
+        existing_projects.remove(project)
+
+if len(inaccessible_folders) > 0:
+    print(Fore.YELLOW + f"{len(inaccessible_folders)} valid projects could not be accessed.")
+
+if len(existing_no_media) > 0:
+    print(Fore.YELLOW + f"{len(existing_no_media)} valid, accessible projects contained no deletable cache media")
+    print(existing_projects)
+
+# Lists for later use
+deleted = []
+not_deleted = []
 
 if len(existing_projects) == 0:
-    print(Fore.RED + "Found no existing projects with optimized media. Exiting.")
+    print(Fore.RED + "Found no existing projects with cache media. Exiting.")
     sys.exit(1)
 else:
-    print(Fore.GREEN + "Found existing projects with optimized media.")
+    print(Fore.GREEN + f"Found {len(existing_projects)} projects with cache media.")
     for project in existing_projects:
-        #print(project['project_name'])
+        #print(project['name'])
         for task in low_priority_tasks:
+
+            # Temporary list for comparison 
+            # ( must not accrue each loop!)
             comp = []
-            ratio = fuzz.ratio(str(task.name), str(project['project_name']))
-            comp.append({'task_name': task.name, 'project_name': project['project_name'], 'ratio': ratio})
+
+            ratio = fuzz.ratio(str(task.name), str(project['name']))
+            comp.append({'task_name': task.name, 'name': project['name'], 'ratio': ratio})
             winner = sorted(comp, key=lambda dct: dct['ratio']).pop()
             if (winner.get('ratio') > int(os.getenv("FUZZY_CONFIDENCE_THRESHOLD"))):
-                print(Fore.GREEN + f"{winner.get('task_name')} - {winner.get('ratio')}%")
-                print(f"Found match for {project['project_name']}.")
+                print(Fore.GREEN + f"{winner.get('task_name')} - {winner.get('ratio')}% confident")
+                print(f"Found match for {project['name']}.")
                 if choose == True:
                     confirm = input(Fore.YELLOW + "Definitely delete? Yes/No\n")
                 if "n" in confirm:
                     print(Fore.YELLOW + "Skipping.")
+                    not_deleted.append(project['name'])
                     continue
                 try:
-                    os.chmod(project['project_path'], stat.S_IWUSR)
-                except:
+                    os.chmod(project['path'], stat.S_IWUSR)
+                except IOError:
                     print("Couldn't change directory permissions.\nAttempting to delete anyway.")
                 else:
-                    print("Deleting optimized media directory.")
+                    print("Deleting cache media files.")
+
+                path_to_deletables = (f"{project['path']}\\*{deletable_ext}")
+                deletables_confirm = input(f"Path for deletable items is: {path_to_deletables} Continue?\n")
+                if "y" not in deletables_confirm:
+                    print("Aborting")
+                    sys.exit(2)
+                
                 try:
-                    shutil.rmtree(project['project_path'])
-                except:
-                    print("Error deleting optimized media directory. Skipping.")
+                    #shutil.rmtree(project['path'])
+                    # Seems only permissible way to achieve on QNAP NAS used in testing
+                    #subprocess.run(["DEL", "/F/Q/S", path_to_deletables, "> NUL"]) # No STDOUT
+                    subprocess.run(["DEL", "/F/Q/S", path_to_deletables], shell=True)
+                    print(f"Deleted cache files in \"{project['name']}\"")
+                except TypeError:
+                    print("Error deleting cache media directory. Skipping.")
                     continue
+                    
 
 ### task attributes/properties ###
 
