@@ -15,8 +15,8 @@ from pathlib import Path
 f = Figlet(font='slant')
 print (f.renderText('Resolve/Clickup Cache Cleaner'))
 
-print("This script will mark files for deletion!\n" +
-      "Follow prompts carefully!\n")
+print(Fore.MAGENTA + "This script will delete files. No output will be visible during deletion\n" +
+                    "Follow prompts carefully!\n")
 
 time.sleep(5)
 
@@ -31,64 +31,25 @@ else:
 
 	
 init(autoreset=True)
-
-# Lists for later use
-deleted = []
-not_deleted = []
-
 ###########################################################################
 ######################### GET CLICKUP TASKS ###############################
 ###########################################################################
 
 print(Fore.MAGENTA + "\nInstantiating clickup API")
-
-# Get environment variables
 clickup = ClickUp(os.getenv("CLICKUP_TOKEN"))
 watch_space = os.getenv("WATCH_SPACE")
-watch_list = os.getenv("WATCH_LIST")
 
 print(Fore.GREEN + "Accessing team")
 main_team = clickup.teams[0]
 
-# Access SPACE
 print(Fore.GREEN + f"Accessing \"{watch_space}\" space")
 for space in main_team.spaces:
     if space.name == watch_space:
         main_space = space
         break
 
-# Error handling if SPACE is unavailable
-try: 
-    main_space
-except NameError:
-    print(Fore.RED + f"Couldn't find \"{watch_space}\" space specified in config file.")
-    print("The following spaces are available:\n")
-    for space in main_team.spaces:
-        print(" -", space.name)
-    print(Fore.RED + "\nAborting...")
-    sys.exit(1)
-    
-# Access LISTS within PROJECT
-print(Fore.GREEN + f"Accessing \"{watch_list}\" list")
-for project in main_space.projects:
-    for list in project.lists:
-        if list.name == watch_list:
-            main_list = list
-            break
-
-# Error handling if PROJECT is unavailable
-try: 
-    main_list
-except NameError:
-    print(Fore.RED + f"Couldn't find \"{watch_list}\" list specified in config file.")
-    print("The following lists are available:\n")
-    for project in main_space.projects:
-        for list in project.lists:
-            print(" -", list.name)
-        print(Fore.RED + "\nAborting...")
-        sys.exit(1)        
-        
-print(main_list)
+main_project = main_space.projects[0]
+main_list = main_project.lists[0]
 
 print(Fore.GREEN + "Getting low priority project tasks...")
 tasks = main_list.get_all_tasks(include_closed=True)
@@ -97,7 +58,7 @@ low_priority_tasks = []
 for task in tasks:
     #print(f"Task: \"{task.name}\" Status: \"{task.status.status}\"")
     #inspect.getmembers(task.status)
-    if (str(task.status.status).lower() in os.getenv('HIGH_PRIORITY')):
+    if (str(task.status.status).lower() == "editing") or (str(task.status.status).lower() == "in review"):
         print(f"Ignoring high priority task: \"{task.name}\"")
         continue
     else:
@@ -130,26 +91,22 @@ except:
 print(Fore.GREEN + "Media cache directory exists and is writable")
 
 # Check go ahead
-# print(low_priority_tasks)
-# winner = sorted(comp, key=lambda dct: dct['ratio']).pop()
-# low_priority_tasks.sort(key=lambda task.status.status)
 for task in low_priority_tasks:
     print(f"\"{task.name}\"|{task.status.status}")
-go_ahead = input(Fore.YELLOW + "\nIf a match is found for one of the projects above, its cache directory will be marked for deletion.\n" +
+go_ahead = input(Fore.YELLOW + "\nIf a match is found for one of the projects above, its cached media will be deleted.\n" +
             "Type 'Yes', 'No', or 'Choose' if you would like to approve each deletion one by one.\n")
 
 choose = False
 if "n" in go_ahead.lower():
-    print(Fore.RED + "\nCancelling...")
+    print(Fore.RED + "Cancelling...")
     sys.exit(2)
 elif "y" in go_ahead.lower():
-    choose = False
-    print(Fore.GREEN + "\nContinuing.")
+    print(Fore.GREEN + "Continuing.")
 elif "c" in go_ahead.lower():
     choose = True
-    print(Fore.GREEN + "\nContinuing with caution.")
+    print(Fore.GREEN + "Continuing with caution.")
 else:
-    print(Fore.RED + "\nInvalid response. Exiting.")
+    print(Fore.RED + "Invalid response. Exiting.")
     sys.exit(1)
 
 
@@ -175,82 +132,91 @@ for project_info in valid_project_folders:
         with open(project_info, "r+") as file:
             name = file.readlines()[2]
             name = name[14:]
-            #print(f"'{name}' has cache folder.")
+            print(f"{name} has a registered local media cache folder.")
             path = os.path.abspath(os.path.join(project_info, '..'))
             existing_projects.append({'name':name, 'path': path})
     except:
         inaccessible_folders.append(project_info)
         continue
 
+# Check existing projects have deletable media
+existing_no_media = []
+print(Fore.GREEN + "Checking for media...\n")
+for project in existing_projects:
+    for root, dirs, files in os.walk(project['path']):
+        for file in files:
+            # Found a deletable item?
+            if file.endswith(deletable_ext):
+                print(file)
+                # waste no more time
+                break
+
+
+    # This project had none?
+    else:
+        print(Fore.YELLOW + f"Existing project \"{project['name']}\" has no deletable media. Skipping.")
+        existing_no_media.append(project)
+        existing_projects.remove(project)
+
+if len(inaccessible_folders) > 0:
+    print(Fore.YELLOW + f"{len(inaccessible_folders)} valid projects could not be accessed.")
+
+if len(existing_no_media) > 0:
+    print(Fore.YELLOW + f"{len(existing_no_media)} valid, accessible projects contained no deletable cache media\n")
+    for existing in existing_projects:
+        print(f"- {existing['name']}")
+
+# Lists for later use
+deleted = []
+not_deleted = []
 
 if len(existing_projects) == 0:
-    print(Fore.RED + "Found no existing projects with cache directory. Exiting.")
+    print(Fore.RED + "Found no existing projects with cache media. Exiting.")
     sys.exit(1)
-
-
 else:
-    print(Fore.YELLOW + f"Found {len(existing_projects)} projects with cache media.\n")
-    print(Fore.RED + "MATCHING LOW PRIORITY PROJECTS")
-
-    deletable = []
-    
+    print(Fore.GREEN + f"Found {len(existing_projects)} projects with cache media.")
     for project in existing_projects:
         #print(project['name'])
         for task in low_priority_tasks:
 
             # Temporary list for comparison 
-            # (must not accrue each loop!)
+            # ( must not accrue each loop!)
             comp = []
-
 
             ratio = fuzz.ratio(str(task.name), str(project['name']))
             comp.append({'task_name': task.name, 'name': project['name'], 'ratio': ratio})
             winner = sorted(comp, key=lambda dct: dct['ratio']).pop()
             if (winner.get('ratio') > int(os.getenv("FUZZY_CONFIDENCE_THRESHOLD"))):
                 print(Fore.GREEN + f"{winner.get('task_name')} - {winner.get('ratio')}% confident")
-                #print(f"Found match for {project['name']}.")
-                deletable.append(winner)
+                print(f"Found match for {project['name']}.")
                 if choose == True:
                     confirm = input(Fore.YELLOW + "Definitely delete? Yes/No\n")
-                    if "n" in confirm:
-                        print(Fore.YELLOW + "Skipping.")
-                        not_deleted.append(project['name'])
-                        continue
+                if "n" in confirm:
+                    print(Fore.YELLOW + "Skipping.")
+                    not_deleted.append(project['name'])
+                    continue
                 try:
                     os.chmod(project['path'], stat.S_IWUSR)
                 except IOError:
-                    print(Fore.RED + "Couldn't change directory permissions.\nAttempting to rename anyway")
+                    print("Couldn't change directory permissions.\nAttempting to delete anyway.")
                 else:
-                    print(Fore.YELLOW + "Appending ' - DELETE ME' to folder name\n")
+                    print("Deleting cache media files.")
 
-                path_to_deletables = (f"{project['path']}")              
+                path_to_deletables = (f"{project['path']}\\*{deletable_ext}")
+                deletables_confirm = input(f"Path for deletable items is: {path_to_deletables} Continue?\n")
+                if "y" not in deletables_confirm:
+                    print("Aborting")
+                    sys.exit(2)
+                
                 try:
-                    os.rename(path_to_deletables, path_to_deletables + " - DELETE ME")
-                except:
-                    print(Fore.RED + "Error renaming cache media directory. Skipping.")
+                    #shutil.rmtree(project['path'])
+                    # Seems only permissible way to achieve on QNAP NAS used in testing
+                    #subprocess.run(["DEL", "/F/Q/S", path_to_deletables, "> NUL"]) # No STDOUT
+                    subprocess.run(["DEL", "/F/Q/S", path_to_deletables], shell=True)
+                    print(f"Deleted cache files in \"{project['name']}\"")
+                except TypeError:
+                    print("Error deleting cache media directory. Skipping.")
                     continue
-                            
-    if len(deletable) == 0:
-        print(Fore.GREEN + "There are no low-priority projects with matching deletable media.")
-        sys.exit(0)
-
-    input(Fore.MAGENTA + "Done! Two windows will open. One in Explorer with the cache files marked ' - DELETE ME', \n"
-    +  "the other, a web browser to the login page of the NAS. Delete the marked cache files directly from the NAS file browser. \n"
-    + "Press ENTER to open a window to the cache folders marked for deletion...")
-
-    # Open browser to NAS login
-    NAS_URL = f"rundll32 url.dll,FileProtocolHandler {os.getenv('NAS_ADDRESS')}"
-    subprocess.run(NAS_URL)
-
-    # Open directory to view deletable folders
-    FILEBROWSER_PATH = os.path.join(os.getenv('WINDIR'), 'explorer.exe')
-    subprocess.run([FILEBROWSER_PATH, media_dir])
-
-
-    input(Fore.MAGENTA + "I'm still here if you need to double check any of the paths above.\n" +
-    "Press ENTER to exit...")
-    sys.exit(0)
-
                     
 
 ### task attributes/properties ###
