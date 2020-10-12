@@ -6,7 +6,6 @@ import sys
 import time
 #import inspect
 from dotenv import load_dotenv
-from pyclickup import ClickUp
 from colorama import init
 from colorama import Fore, Back, Style
 from fuzzywuzzy import fuzz
@@ -18,7 +17,7 @@ print (f.renderText('Resolve/Clickup Cache Cleaner'))
 print("This script will mark files for deletion!\n" +
       "Follow prompts carefully!\n")
 
-time.sleep(5)
+# time.sleep(5)
 
 # Change .env file to alter variables #
 try:
@@ -36,83 +35,9 @@ init(autoreset=True)
 deleted = []
 not_deleted = []
 
-###########################################################################
-######################### GET CLICKUP TASKS ###############################
-###########################################################################
-
-print(Fore.MAGENTA + "\nInstantiating clickup API")
-
-# Get environment variables
-clickup = ClickUp(os.getenv("CLICKUP_TOKEN"))
-watch_space = os.getenv("WATCH_SPACE")
-watch_list = os.getenv("WATCH_LIST")
-
-print(Fore.GREEN + "Accessing team")
-main_team = clickup.teams[0]
-
-# Access SPACE
-print(Fore.GREEN + f"Accessing \"{watch_space}\" space")
-for space in main_team.spaces:
-    if space.name == watch_space:
-        main_space = space
-        break
-
-# Error handling if SPACE is unavailable
-try: 
-    main_space
-except NameError:
-    print(Fore.RED + f"Couldn't find \"{watch_space}\" space specified in config file.")
-    print("The following spaces are available:\n")
-    for space in main_team.spaces:
-        print(" -", space.name)
-    print(Fore.RED + "\nAborting...")
-    sys.exit(1)
-    
-# Access LISTS within PROJECT
-print(Fore.GREEN + f"Accessing \"{watch_list}\" list")
-for project in main_space.projects:
-    for list in project.lists:
-        if list.name == watch_list:
-            main_list = list
-            break
-
-# Error handling if PROJECT is unavailable
-try: 
-    main_list
-except NameError:
-    print(Fore.RED + f"Couldn't find \"{watch_list}\" list specified in config file.")
-    print("The following lists are available:\n")
-    for project in main_space.projects:
-        for list in project.lists:
-            print(" -", list.name)
-        print(Fore.RED + "\nAborting...")
-        sys.exit(1)        
-        
-print(main_list)
-
-print(Fore.GREEN + "Getting low priority project tasks...")
-tasks = main_list.get_all_tasks(include_closed=True)
-
-low_priority_tasks = []
-for task in tasks:
-    #print(f"Task: \"{task.name}\" Status: \"{task.status.status}\"")
-    #inspect.getmembers(task.status)
-    if (str(task.status.status).lower() in os.getenv('HIGH_PRIORITY')):
-        print(f"Ignoring high priority task: \"{task.name}\"")
-        continue
-    else:
-        low_priority_tasks.append(task)
-
-if len(low_priority_tasks) == len(tasks):
-    print(Fore.RED + "All tasks have been deemed low priority. Something is probably wrong. Have the space statuses changed?")
-    sys.exit(1)
-
-elif len(low_priority_tasks) == 0:
-    print(Fore.RED + "No low priority tasks found. Something is probably wrong. Have the space statuses changed?")
-    sys.exit(1)
 
 ###########################################################################
-################ GET PROJECTS WITH cache MEDIA ########################
+#################### GET PROJECTS WITH CACHE MEDIA ########################
 ###########################################################################
 
 print(Fore.MAGENTA + "\nSearching drive for corresponding projects")
@@ -129,46 +54,34 @@ except:
     
 print(Fore.GREEN + "Media cache directory exists and is writable")
 
-# Check go ahead
-# print(low_priority_tasks)
-# winner = sorted(comp, key=lambda dct: dct['ratio']).pop()
-# low_priority_tasks.sort(key=lambda task.status.status)
-for task in low_priority_tasks:
-    print(f"\"{task.name}\"|{task.status.status}")
-go_ahead = input(Fore.YELLOW + "\nIf a match is found for one of the projects above, its cache directory will be marked for deletion.\n" +
-            "Type 'Yes', 'No', or 'Choose' if you would like to approve each deletion one by one.\n")
-
-choose = False
-if "n" in go_ahead.lower():
-    print(Fore.RED + "\nCancelling...")
-    sys.exit(2)
-elif "y" in go_ahead.lower():
-    choose = False
-    print(Fore.GREEN + "\nContinuing.")
-elif "c" in go_ahead.lower():
-    choose = True
-    print(Fore.GREEN + "\nContinuing with caution.")
-else:
-    print(Fore.RED + "\nInvalid response. Exiting.")
-    sys.exit(1)
-
 
 text_files = []
 print(Fore.GREEN + "Getting project media cache folders...")
 print(media_dir)
-exit(0)
-# text_files = [y for x in os.walk(media_dir) for y in glob(os.path.join(x[0], '*info.txt'))]
 
-
-for text_file in text_files:
-    try:
-        os.access(text_file, os.F_OK)
-        text_files.append(text_file)
-    except:
-        continue
+for dirpath, dirs, files in os.walk(media_dir):  
+  for filename in files:
+    fname = os.path.join(dirpath,filename)
+    if fname is 'Info.txt': 
+      print(Fore.GREEN + dirpath)
+      text_files.append(os.path.join(dirpath, 'Info.txt'))
+    else:
+        print(f"Scanned {fname}, ignoring...")
+        break
+    
+    for dir in dirs:
+        if dir is "Collaboration":
+            try:
+                path = os.path.join(dir,'Info.txt')
+                os.access(path)
+                text_files.append(path)
+                print(Fore.GREEN + path)
+            except:
+                print(f"Scanned {dir}, empty...")
 
 for text_file in text_files:
     print(text_file)
+
 exit(0)
 
 # Find all existing proejcts, determine name and path

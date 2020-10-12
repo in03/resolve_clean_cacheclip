@@ -10,7 +10,7 @@ from pyclickup import ClickUp
 from colorama import init
 from colorama import Fore, Back, Style
 from fuzzywuzzy import fuzz
-from glob import glob
+from pathlib import Path
 
 f = Figlet(font='slant')
 print (f.renderText('Resolve/Clickup Cache Cleaner'))
@@ -153,39 +153,33 @@ else:
     sys.exit(1)
 
 
-text_files = []
+valid_project_folders = []
 print(Fore.GREEN + "Getting project media cache folders...")
-print(media_dir)
-exit(0)
-# text_files = [y for x in os.walk(media_dir) for y in glob(os.path.join(x[0], '*info.txt'))]
-
-
-for text_file in text_files:
+project_folders = next(os.walk(media_dir))[1]
+for project in project_folders:
+    project_info = f"{media_dir}\\{project}\\info.txt"
     try:
-        os.access(text_file, os.F_OK)
-        text_files.append(text_file)
+        os.access(project_info, os.F_OK)
     except:
         continue
-
-for text_file in text_files:
-    print(text_file)
-exit(0)
+    else:
+        valid_project_folders.append(project_info)
 
 # Find all existing proejcts, determine name and path
 existing_projects = []
 inaccessible_folders = []
 print(Fore.GREEN + "Reading info.txt files...")
-for text_file in text_files:
+for project_info in valid_project_folders:
     
     try:
-        with open(text_file, "r+") as file:
+        with open(project_info, "r+") as file:
             name = file.readlines()[2]
             name = name[14:]
             #print(f"'{name}' has cache folder.")
-            path = os.path.abspath(os.path.join(text_file, '..'))
+            path = os.path.abspath(os.path.join(project_info, '..'))
             existing_projects.append({'name':name, 'path': path})
     except:
-        inaccessible_folders.append(text_file)
+        inaccessible_folders.append(project_info)
         continue
 
 
